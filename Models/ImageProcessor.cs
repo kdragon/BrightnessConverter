@@ -1,4 +1,5 @@
-﻿using System.Drawing;
+﻿using System;
+using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 
@@ -26,12 +27,14 @@ namespace BrightnessConverter.Models
             }
 
             float avgBrightness = totalBrightness / (bitmap.Width * bitmap.Height);
+
+            // PixelStats 객체 내부에서 퍼센티지 계산
             return new PixelStats(lowPixels, highPixels, avgBrightness, bitmap.Width * bitmap.Height);
         }
 
         public Bitmap AdjustBrightness(Bitmap bitmap, float targetBrightness, float currentBrightness)
         {
-            float brightnessRatio = targetBrightness / currentBrightness;
+            float brightnessOffset = targetBrightness - currentBrightness;
             Bitmap adjustedImage = new Bitmap(bitmap.Width, bitmap.Height);
 
             for (int y = 0; y < bitmap.Height; y++)
@@ -39,9 +42,10 @@ namespace BrightnessConverter.Models
                 for (int x = 0; x < bitmap.Width; x++)
                 {
                     Color pixel = bitmap.GetPixel(x, y);
-                    int adjustedR = (int)Math.Clamp(pixel.R * brightnessRatio, 0, 255);
-                    int adjustedG = (int)Math.Clamp(pixel.G * brightnessRatio, 0, 255);
-                    int adjustedB = (int)Math.Clamp(pixel.B * brightnessRatio, 0, 255);
+
+                    int adjustedR = (int)Math.Clamp(pixel.R + brightnessOffset, 0, 255);
+                    int adjustedG = (int)Math.Clamp(pixel.G + brightnessOffset, 0, 255);
+                    int adjustedB = (int)Math.Clamp(pixel.B + brightnessOffset, 0, 255);
 
                     adjustedImage.SetPixel(x, y, Color.FromArgb(adjustedR, adjustedG, adjustedB));
                 }
@@ -50,32 +54,9 @@ namespace BrightnessConverter.Models
             return adjustedImage;
         }
 
-        // 저장기능 추가
-        public void SaveAdjustedBrightnessImage(string inputFilePath, string outputFolderPath, float targetBrightness, int lowThreshold, int highThreshold)
-        {
-            using Bitmap originalBitmap = new Bitmap(inputFilePath);
-
-            // 분석
-            PixelStats stats = AnalyzeImage(originalBitmap, lowThreshold, highThreshold);
-
-            // 밝기 조정
-            Bitmap adjustedBitmap = AdjustBrightness(originalBitmap, targetBrightness, stats.AverageBrightness);
-
-            // 저장경로 생성
-            string fileName = Path.GetFileName(inputFilePath);
-            string outputFilePath = Path.Combine(outputFolderPath, fileName);
-
-            // 이미지 저장 (원본 이미지와 같은 포맷 유지)
-            ImageFormat format = GetImageFormat(inputFilePath);
-            adjustedBitmap.Save(outputFilePath, format);
-
-            adjustedBitmap.Dispose();
-        }
-
         private ImageFormat GetImageFormat(string filePath)
         {
             string ext = Path.GetExtension(filePath).ToLower();
-
             return ext switch
             {
                 ".jpg" or ".jpeg" => ImageFormat.Jpeg,
@@ -83,6 +64,52 @@ namespace BrightnessConverter.Models
                 ".png" => ImageFormat.Png,
                 ".gif" => ImageFormat.Gif,
                 _ => ImageFormat.Png,
+            };
+        }
+
+
+        public ImageProcessingResult ProcessImage(string inputFilePath, string outputFolderPath, float targetBrightness, int lowThreshold, int highThreshold)
+        {
+            // 원본 이미지 로드
+            using Bitmap originalBitmap = new Bitmap(inputFilePath);
+
+            // 변환 전 이미지 분석
+            PixelStats originalStats = AnalyzeImage(originalBitmap, lowThreshold, highThreshold);
+            float originalAvg = originalStats.AverageBrightness;
+            float brightnessDifference = Math.Abs(originalAvg - targetBrightness);
+
+            // 밝기 조정
+            using Bitmap adjustedBitmap = AdjustBrightness(originalBitmap, targetBrightness, originalAvg);
+
+            // 파일명 및 저장 경로 구성
+            string fileName = Path.GetFileName(inputFilePath);
+            string outputFilePath = Path.Combine(outputFolderPath, fileName);
+            ImageFormat format = GetImageFormat(inputFilePath);
+
+            // 변환된 이미지 저장
+            adjustedBitmap.Save(outputFilePath, format);
+
+            // 변환 후 이미지 분석
+            PixelStats adjustedStats = AnalyzeImage(adjustedBitmap, lowThreshold, highThreshold);
+            float adjustedAvg = adjustedStats.AverageBrightness;
+
+            // adjustedBitmap.Dispose();
+
+            // ImageProcessingResult 객체 생성 및 반환 (소수점 두자리 반올림)
+            return new ImageProcessingResult
+            {
+                FileName = fileName,
+                OriginalLowPixelCount = originalStats.LowPixelCount,
+                OriginalLowPixelPercentage = (float)Math.Round(originalStats.LowPixelPercentage, 2),
+                OriginalHighPixelCount = originalStats.HighPixelCount,
+                OriginalHighPixelPercentage = (float)Math.Round(originalStats.HighPixelPercentage, 2),
+                OriginalAverageBrightness = (float)Math.Round(originalAvg, 2),
+                BrightnessDifference = (float)Math.Round(brightnessDifference, 2),
+                AdjustedLowPixelCount = adjustedStats.LowPixelCount,
+                AdjustedLowPixelPercentage = (float)Math.Round(adjustedStats.LowPixelPercentage, 2),
+                AdjustedHighPixelCount = adjustedStats.HighPixelCount,
+                AdjustedHighPixelPercentage = (float)Math.Round(adjustedStats.HighPixelPercentage, 2),
+                AdjustedAverageBrightness = (float)Math.Round(adjustedAvg, 2)
             };
         }
     }
